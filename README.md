@@ -37,6 +37,8 @@ Because this vulnerability resides in the core runtime binary rather than a user
 
 ## Command Reference & Live Execution
 
+![Terminal Execution](terminal_demo.svg)
+
 ### 1. Host Runtime Audit
 
 Inspect local PHP installations, active SAPIs, and configuration directives:
@@ -44,18 +46,26 @@ Inspect local PHP installations, active SAPIs, and configuration directives:
 ```bash
 $ python3 run.py scan
 
---- ANTI-PHP2SHELL SECURITY AUDIT ---
-PHP Binary: /usr/bin/php
-Detected Version: 8.3.6
-Active SAPI(s): None detected
-session.upload_progress: ENABLED (Dangerous)
-Found php.ini files: 3
-  - /etc/php/8.3/apache2/php.ini
-  - /etc/php/8.3/cli/php.ini
-  - /etc/php/8.3/fpm/php.ini
+┌──────────────────────────────────────────────────────────────────┐
+│  anti-php2shell :: HOST SECURITY AUDIT                          
+│  Evaluating PHP runtime, SAPIs, and upload_progress directives   
+└──────────────────────────────────────────────────────────────────┘
 
-Audit Status: [HIGH RISK]
-Details: PHP 8.3.6 vulnerable with session.upload_progress.enabled=1.
+┌── RUNTIME DIAGNOSTICS ───────────────────────────────────────────┐
+│  PHP Binary           : /usr/bin/php
+│  Detected Version     : 8.3.6
+│  Active SAPI(s)       : None detected
+│  Upload Progress      : ENABLED (Dangerous)
+│  Discovered INIs      : 3
+│  Audit Status         : [HIGH RISK]
+└──────────────────────────────────────────────────────────────────┘
+
+ Discovered Configuration Targets:
+  ├─ /etc/php/8.3/apache2/php.ini
+  ├─ /etc/php/8.3/cli/php.ini
+  └─ /etc/php/8.3/fpm/php.ini
+
+ Recommendation: PHP 8.3.6 vulnerable with session.upload_progress.enabled=1.
 ```
 
 ### 2. Atomic Inoculation & WAF Export
@@ -172,18 +182,24 @@ anti-php2shell/
 │   ├── hunter.py             # Log forensic analyzer and stream reader
 │   ├── ledger.py             # Transaction tracking and rollback engine
 │   ├── scanner.py            # Local SAPI, PHP binary, and INI configuration auditor
+│   ├── ui.py                 # Pure ANSI terminal color, card, and banner engine
 │   ├── vaccine.py            # In-place INI patcher and WAF rule exporter
 │   └── validator.py          # Pre-flight syntax validation engine
+├── scripts/
+│   └── generate_svg.py       # Zero-dependency terminal screenshot SVG generator
 ├── tests/
 │   ├── test_checker.py       # Unit tests for WAF detection and URL auditor
 │   ├── test_fs.py            # Unit tests for atomic file writes and permissions
 │   ├── test_hunter.py        # Unit tests for forensic log parser and regex
 │   ├── test_ledger.py        # Unit tests for rollback state and checksum validation
 │   ├── test_scanner.py       # Unit tests for version matrix and INI parsing
+│   ├── test_ui.py            # Unit tests for ANSI styling and badge rendering
 │   ├── test_vaccine.py       # Unit tests for inoculation and WAF rule export
 │   └── test_validator.py     # Unit tests for syntax validation sandbox
 ├── waf-rules/                # Exported WAF virtual patch rules (Nginx, Apache, Caddy, CF)
+├── terminal_demo.svg         # Dark-mode terminal visual execution screenshot
 ├── run.py                    # Root CLI entrypoint
+├── LICENSE                   # MIT license file
 ├── README.md                 # Technical documentation
 └── .gitignore                # Git ignore rules
 ```

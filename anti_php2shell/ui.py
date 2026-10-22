@@ -24,6 +24,8 @@ BG_GRAY = "\033[1;97;100m"
 def is_color_enabled() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
     return sys.stdout.isatty()
 
 def c(text: str, code: str) -> str:
