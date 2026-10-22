@@ -1,6 +1,7 @@
 # anti-php2shell
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
+[![GitHub Release](https://img.shields.io/github/v/release/yanzyuyu/phptshell?color=blue&logo=github)](https://github.com/yanzyuyu/phptshell/releases)
 [![Security Rating](https://img.shields.io/badge/CVSS%20v4.0-9.2%20CRITICAL-critical)](https://github.com/yanzyuyu/phptshell)
 [![Vulnerability](https://img.shields.io/badge/CVE-2026--109618%20%2F%2019-red)](https://github.com/yanzyuyu/phptshell)
 [![Dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-brightgreen)](https://github.com/yanzyuyu/phptshell)
@@ -9,6 +10,17 @@
 [![License](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 
 Zero-dependency vulnerability audit, runtime inoculation, and forensic hunter against PHP2Shell (CVE-2026-109618 & CVE-2026-109619).
+
+---
+
+## Table of Contents
+- [Operational Reality & Threat Profile](#operational-reality--threat-profile)
+- [Architectural Capabilities](#architectural-capabilities)
+- [Command Reference & Live Execution](#command-reference--live-execution)
+- [Repository Structure](#repository-structure)
+- [Verification & Test Suite](#verification--test-suite)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -214,4 +226,20 @@ Run the test suite using Python's built-in `unittest` framework:
 python3 -m unittest discover -s tests -v
 ```
 
-All 17 test cases execute deterministically in under 0.2 seconds without external dependencies or network access.
+All 18 test cases execute deterministically in under 0.2 seconds without external dependencies or network access.
+
+---
+
+## Contributing
+
+1. Fork the repository on GitHub.
+2. Create your feature branch (`git checkout -b feature/defense-improvement`).
+3. Ensure all tests pass (`python3 -m unittest discover -s tests -v`) and static audits pass with score 100 (`npx tyw-cli scan .`).
+4. Commit your changes using human-grade, concise messages (`git commit -m "add defense improvement"`).
+5. Push to the branch (`git push origin feature/defense-improvement`) and submit a Pull Request.
+
+---
+
+## License
+
+Distributed under the **MIT License**. See [LICENSE](LICENSE) for full details.
