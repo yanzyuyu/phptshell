@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from anti_php2shell.checker import probe_endpoint
+from anti_php2shell.checker import audit_url
 from anti_php2shell.hunter import scan_log_directory
 from anti_php2shell.ledger import RollbackLedger
 from anti_php2shell.scanner import run_system_scan
@@ -221,34 +221,48 @@ def cmd_hunt(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_check(args: argparse.Namespace) -> int:
-    result = probe_endpoint(args.url, timeout=args.timeout)
+    report = audit_url(args.url, timeout=args.timeout)
     if args.json:
         data = {
-            "target_url": result.target_url,
-            "status_code": result.status_code,
-            "is_blocked_by_waf": result.is_blocked_by_waf,
-            "is_potentially_vulnerable": result.is_potentially_vulnerable,
-            "message": result.message,
+            "target_url": report.target_url,
+            "status_code": report.status_code,
+            "server_header": report.server_header,
+            "php_version": report.php_version,
+            "is_php_vulnerable": report.is_php_vulnerable,
+            "waf_detected": report.waf_detected,
+            "virtual_patch_active": report.virtual_patch_active,
+            "missing_headers": report.missing_headers,
+            "risk_level": report.risk_level,
+            "summary": report.summary,
         }
         print(json.dumps(data, indent=2))
-        return 0 if result.is_blocked_by_waf else 1
+        return 0 if report.risk_level in ("PROTECTED", "LOW") else 1
 
-    print(f"\n--- ANTI-PHP2SHELL CANARY VERIFIER ---")
-    print(f"Probing: {args.url}")
-    if result.is_blocked_by_waf:
-        print(f"Result: {badge('PROTECTED', COLOR_GREEN)}")
-        print(f"Server response code: HTTP {result.status_code}")
-        print(f"Status: {result.message}\n")
-        return 0
-    elif result.is_potentially_vulnerable:
-        print(f"Result: {badge('VULNERABLE OR UNFILTERED', COLOR_RED)}")
-        print(f"Server response code: HTTP {result.status_code}")
-        print(f"Status: {result.message}\n")
-        return 1
+    print("\n--- ANTI-PHP2SHELL ENDPOINT DEFENSE AUDITOR ---")
+    print(f"Target URL: {report.target_url}")
+    print(f"HTTP Status: {report.status_code if report.status_code is not None else 'Unreachable'}")
+    print(f"Server Header: {report.server_header or 'Hidden / Not exposed'}")
+    print(f"PHP Runtime: {report.php_version or 'Hidden / Not exposed'}")
+    print(f"WAF Layer: {report.waf_detected or 'None detected'}")
+    print(f"Virtual Patch: {'ACTIVE (Drop upload progress)' if report.virtual_patch_active else 'UNFILTERED'}")
+    if report.missing_headers:
+        print(f"Missing Hardening Headers: {', '.join(report.missing_headers)}")
+
+    level = report.risk_level
+    if level == "PROTECTED":
+        b = badge("PROTECTED", COLOR_GREEN)
+    elif level == "CRITICAL":
+        b = badge("CRITICAL EXPOSURE", COLOR_RED)
+    elif level == "EXPOSED":
+        b = badge("EXPOSED", COLOR_YELLOW)
+    elif level == "LOW":
+        b = badge("LOW RISK", COLOR_BLUE)
     else:
-        print(f"Result: {badge('UNVERIFIED', COLOR_YELLOW)}")
-        print(f"Status: {result.message}\n")
-        return 2
+        b = badge(level, COLOR_RED)
+
+    print(f"\nDefense Status: {b}")
+    print(f"Summary: {report.summary}\n")
+    return 0 if level in ("PROTECTED", "LOW") else 1
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
