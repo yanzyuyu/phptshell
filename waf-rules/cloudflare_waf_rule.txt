@@ -1,0 +1,1 @@
+(http.request.uri.query contains "PHP_SESSION_UPLOAD_PROGRESS") or (http.request.body.raw contains "PHP_SESSION_UPLOAD_PROGRESS")

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.bak*
+.pytest_cache/
+venv/
+.venv/
+.env
+.agents/
+.agent/
+_agents/
+_agent/

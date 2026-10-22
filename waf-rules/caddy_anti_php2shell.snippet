@@ -1,0 +1,6 @@
+@php2shell_blocked {
+    query *PHP_SESSION_UPLOAD_PROGRESS*
+}
+handle @php2shell_blocked {
+    respond "Blocked by anti-php2shell" 403
+}
