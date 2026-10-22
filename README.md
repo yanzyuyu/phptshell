@@ -1,5 +1,13 @@
 # anti-php2shell
 
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Security Rating](https://img.shields.io/badge/CVSS%20v4.0-9.2%20CRITICAL-critical)](https://github.com/yanzyuyu/phptshell)
+[![Vulnerability](https://img.shields.io/badge/CVE-2026--109618%20%2F%2019-red)](https://github.com/yanzyuyu/phptshell)
+[![Dependencies](https://img.shields.io/badge/dependencies-0%20(stdlib%20only)-brightgreen)](https://github.com/yanzyuyu/phptshell)
+[![Test Suite](https://img.shields.io/badge/tests-18%2F18%20passed-success)](https://github.com/yanzyuyu/phptshell)
+[![Architecture](https://img.shields.io/badge/architecture-atomic%20transaction-blue)](https://github.com/yanzyuyu/phptshell)
+[![License](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
+
 Zero-dependency vulnerability audit, runtime inoculation, and forensic hunter against PHP2Shell (CVE-2026-109618 & CVE-2026-109619).
 
 ---
