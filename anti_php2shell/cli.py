@@ -6,8 +6,9 @@ from typing import Optional
 
 from anti_php2shell.checker import probe_endpoint
 from anti_php2shell.hunter import scan_log_directory
+from anti_php2shell.ledger import RollbackLedger
 from anti_php2shell.scanner import run_system_scan
-from anti_php2shell.vaccine import export_waf_rules, patch_single_ini
+from anti_php2shell.vaccine import export_waf_rules, patch_single_ini, reload_php_services
 
 COLOR_RED = "\033[91m"
 COLOR_GREEN = "\033[92m"
@@ -25,6 +26,20 @@ def badge(text: str, color: str) -> str:
 
 def cmd_scan(args: argparse.Namespace) -> int:
     result = run_system_scan(custom_ini_dir=args.ini_dir)
+    if args.json:
+        data = {
+            "binary_path": result.binary_path,
+            "version": result.version_str,
+            "is_vulnerable": result.is_vulnerable_version,
+            "upload_progress_enabled": result.upload_progress_enabled,
+            "active_sapi": result.active_sapi,
+            "ini_files": [str(p) for p in result.ini_files],
+            "risk_level": result.risk_level,
+            "summary": result.summary,
+        }
+        print(json.dumps(data, indent=2))
+        return 1 if result.risk_level in ("CRITICAL", "HIGH") else 0
+
     print("\n--- ANTI-PHP2SHELL SECURITY AUDIT ---")
     print(f"PHP Binary: {result.binary_path or 'Not found in PATH'}")
     print(f"Detected Version: {result.version_str or 'Unknown'}")
@@ -52,7 +67,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 def cmd_vaccine(args: argparse.Namespace) -> int:
     out_dir = Path(args.out_dir)
-    print("\n--- ANTI-PHP2SHELL ACTIVE INOCULATION ---")
+    ledger_path = Path(args.ledger) if args.ledger else None
+    ledger = RollbackLedger(ledger_path)
 
     target_inis = []
     if args.ini:
@@ -60,40 +76,106 @@ def cmd_vaccine(args: argparse.Namespace) -> int:
         if p.is_file():
             target_inis.append(p)
         else:
-            print(f"Error: Specified ini file '{p}' not found.")
+            if args.json:
+                print(json.dumps({"error": f"Specified ini file '{p}' not found."}))
+            else:
+                print(f"Error: Specified ini file '{p}' not found.")
             return 1
     else:
         scan_res = run_system_scan()
         target_inis = scan_res.ini_files
 
+    patch_results = []
+    for ini in target_inis:
+        if args.dry_run:
+            patch_results.append({"file": str(ini), "status": "DRY_RUN", "applied": False})
+        else:
+            res = patch_single_ini(ini, ledger=ledger)
+            patch_results.append(
+                {
+                    "file": str(res.target_path),
+                    "backup": str(res.backup_path) if res.backup_path else None,
+                    "applied": res.applied,
+                    "status": res.status,
+                }
+            )
+
+    waf_files = export_waf_rules(out_dir)
+    waf_data = [{"name": title, "path": str(filepath)} for title, filepath in waf_files]
+
+    reload_data = []
+    if args.reload:
+        reloads = reload_php_services()
+        reload_data = [{"service": svc, "success": ok, "detail": det} for svc, ok, det in reloads]
+
+    if args.json:
+        payload = {
+            "patches": patch_results,
+            "waf_rules": waf_data,
+            "reloads": reload_data,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print("\n--- ANTI-PHP2SHELL ACTIVE INOCULATION ---")
     if not target_inis:
         print("No php.ini files detected to inoculate.")
     else:
-        for ini in target_inis:
-            if args.dry_run:
-                print(f"[DRY-RUN] Would patch: {ini}")
+        for pr in patch_results:
+            if pr.get("status") == "DRY_RUN":
+                print(f"[DRY-RUN] Would patch: {pr['file']}")
+            elif pr.get("applied"):
+                print(f"{badge('VACCINATED', COLOR_GREEN)} {pr['file']}")
+                if pr.get("backup"):
+                    print(f"  Backup saved: {pr['backup']}")
             else:
-                res = patch_single_ini(ini)
-                if res.applied:
-                    print(f"{badge('VACCINATED', COLOR_GREEN)} {res.target_path}")
-                    if res.backup_path:
-                        print(f"  Backup saved: {res.backup_path}")
-                else:
-                    print(f"{badge('FAILED', COLOR_RED)} {res.target_path}: {res.status}")
+                print(f"{badge('FAILED', COLOR_RED)} {pr['file']}: {pr['status']}")
 
     print(f"\nGenerating WAF Virtual Patch rules in: {out_dir}")
-    waf_files = export_waf_rules(out_dir)
-    for title, filepath in waf_files:
-        print(f"  {badge('GENERATED', COLOR_BLUE)} {title}: {filepath}")
+    for item in waf_data:
+        print(f"  {badge('GENERATED', COLOR_BLUE)} {item['name']}: {item['path']}")
 
-    print("\nReminder: Reload your web server or PHP-FPM service to activate changes.\n")
+    if args.reload:
+        print("\nReloading services gracefully:")
+        for r in reload_data:
+            st = badge("RELOADED", COLOR_GREEN) if r["success"] else badge("FAILED", COLOR_RED)
+            print(f"  {st} {r['service']}: {r['detail']}")
+    else:
+        print("\nReminder: Reload your web server or PHP-FPM service to activate changes.\n")
+
     return 0
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    ledger_path = Path(args.ledger) if args.ledger else None
+    ledger = RollbackLedger(ledger_path)
+    results = ledger.rollback(target_filter=args.target)
+
+    if args.json:
+        data = [
+            {"target": target, "success": ok, "detail": detail}
+            for target, ok, detail in results
+        ]
+        print(json.dumps({"rollback_results": data}, indent=2))
+        return 0 if all(ok for _, ok, _ in results) else 1
+
+    print("\n--- ANTI-PHP2SHELL ROLLBACK ENGINE ---")
+    if not results:
+        print("No recorded transactions found in ledger to rollback.")
+        return 0
+
+    all_ok = True
+    for target, ok, detail in results:
+        if ok:
+            print(f"{badge('RESTORED', COLOR_GREEN)} {target}: {detail}")
+        else:
+            all_ok = False
+            print(f"{badge('FAILED', COLOR_RED)} {target}: {detail}")
+
+    print()
+    return 0 if all_ok else 1
 
 def cmd_hunt(args: argparse.Namespace) -> int:
     log_path = Path(args.log)
-    print(f"\n--- ANTI-PHP2SHELL FORENSIC LOG HUNTER ---")
-    print(f"Inspecting target path: {log_path}")
-
     report = scan_log_directory(log_path)
     if args.json:
         data = {
@@ -115,6 +197,8 @@ def cmd_hunt(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2))
         return 0
 
+    print(f"\n--- ANTI-PHP2SHELL FORENSIC LOG HUNTER ---")
+    print(f"Inspecting target path: {log_path}")
     print(f"Lines Scanned: {report.total_lines_scanned:,}")
     print(f"Incidents Detected: {report.incidents_found}")
     if report.incidents_found > 0:
@@ -137,10 +221,20 @@ def cmd_hunt(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_check(args: argparse.Namespace) -> int:
+    result = probe_endpoint(args.url, timeout=args.timeout)
+    if args.json:
+        data = {
+            "target_url": result.target_url,
+            "status_code": result.status_code,
+            "is_blocked_by_waf": result.is_blocked_by_waf,
+            "is_potentially_vulnerable": result.is_potentially_vulnerable,
+            "message": result.message,
+        }
+        print(json.dumps(data, indent=2))
+        return 0 if result.is_blocked_by_waf else 1
+
     print(f"\n--- ANTI-PHP2SHELL CANARY VERIFIER ---")
     print(f"Probing: {args.url}")
-    result = probe_endpoint(args.url, timeout=args.timeout)
-
     if result.is_blocked_by_waf:
         print(f"Result: {badge('PROTECTED', COLOR_GREEN)}")
         print(f"Server response code: HTTP {result.status_code}")
@@ -165,13 +259,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan_parser = subparsers.add_parser("scan", help="Scan local system for vulnerable PHP runtimes and configs.")
     scan_parser.add_argument("--ini-dir", type=str, default=None, help="Custom directory to search for php.ini")
+    scan_parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     scan_parser.set_defaults(func=cmd_scan)
 
     vaccine_parser = subparsers.add_parser("vaccine", help="Immunize php.ini files and export WAF rules.")
     vaccine_parser.add_argument("--ini", type=str, default=None, help="Specific php.ini file to patch")
     vaccine_parser.add_argument("--dry-run", action="store_true", help="Simulate patch without writing")
     vaccine_parser.add_argument("--out-dir", type=str, default="./waf-rules", help="Directory for WAF rule exports")
+    vaccine_parser.add_argument("--ledger", type=str, default=None, help="Custom rollback ledger file path")
+    vaccine_parser.add_argument("--reload", action="store_true", help="Gracefully reload PHP and web server services")
+    vaccine_parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     vaccine_parser.set_defaults(func=cmd_vaccine)
+
+    rollback_parser = subparsers.add_parser("rollback", help="Restore original php.ini files using rollback ledger.")
+    rollback_parser.add_argument("--target", type=str, default=None, help="Specific target file to rollback")
+    rollback_parser.add_argument("--ledger", type=str, default=None, help="Custom rollback ledger file path")
+    rollback_parser.add_argument("--json", action="store_true", help="Output results in JSON format")
+    rollback_parser.set_defaults(func=cmd_rollback)
 
     hunt_parser = subparsers.add_parser("hunt", help="Analyze web server logs for PHP2Shell exploitation artifacts.")
     hunt_parser.add_argument("--log", type=str, required=True, help="Path to log file or log directory")
@@ -181,6 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser("check", help="Send safe diagnostic canary probe to target URL.")
     check_parser.add_argument("--url", type=str, required=True, help="Target URL (e.g., http://localhost/index.php)")
     check_parser.add_argument("--timeout", type=float, default=5.0, help="HTTP request timeout in seconds")
+    check_parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     check_parser.set_defaults(func=cmd_check)
 
     return parser

@@ -8,16 +8,17 @@ Zero-dependency defense, vulnerability audit, and inoculation tool against PHP2S
 
 Publikasi celah PHP2Shell (CVE-2026-109618 dan CVE-2026-109619) dengan skor CVSS 9.2 memungkinkan unauthenticated remote code execution (RCE) langsung pada core runtime PHP dari versi 5.4 hingga 8.5 melalui heap corruption pada modul `session.upload_progress`. Karena bug ini berada pada level binary runtime PHP (bukan composer dependency), dependabot dan audit SCA biasa tidak bisa mendeteksinya. Lebih buruk lagi, banyak server di production tidak bisa langsung di-reboot atau di-compile ulang seketika saat eksploitasi publik mulai membanjiri akses jaringan.
 
-`anti-php2shell` dibangun dengan Python standard library murni (zero-dependency) agar dapat langsung di-drop ke server production, container Docker, atau pipeline CI/CD tanpa perlu `pip install`.
+`anti-php2shell` dibangun dengan Python standard library murni (zero-dependency) agar dapat langsung di-drop ke server production, container Docker, atau pipeline CI/CD tanpa perlu `pip install`. Seluruh penulisan file menggunakan atomic inode replacement dengan preservasi permission (`chmod`/`chown`), pre-flight syntax check, dan rollback ledger otomatis.
 
 ---
 
 ## Cara Kerja (Under the Hood)
 
 1. **System & SAPI Auditor (`scan`):** Memeriksa binary PHP lokal, mengecek versi terhadap threshold patch resmi (8.2.35, 8.3.36, 8.4.27, 8.5.12), memetakan SAPI aktif (Apache mod_php, PHP-FPM, FrankenPHP), serta membaca status direktif `session.upload_progress.enabled` di seluruh `php.ini`.
-2. **Active Inoculator & Virtual Patch Generator (`vaccine`):** Melakukan patching in-place yang aman dengan backup timestamp otomatis pada `php.ini` (`session.upload_progress.enabled = 0`), sekaligus men-generate virtual patch rules untuk Nginx, Apache (.htaccess), Caddy, dan Cloudflare WAF guna memblokir payload sebelum mencapai worker PHP.
-3. **Forensic Log Hunter (`hunt`):** Memindai access log dan error log web server (Nginx/Apache/PHP-FPM) untuk mendeteksi signature serangan `PHP_SESSION_UPLOAD_PROGRESS` dan korelasi worker SIGSEGV (signal 11 / exit code 139) akibat memory corruption.
-4. **Harmless Canary Probe (`check`):** Mengirimkan multipart probe non-destruktif untuk memverifikasi apakah filter WAF atau konfigurasi server sudah aktif memblokir vektor serangan tanpa merusak stabilitas server.
+2. **Pre-Flight Syntax Validation & Inoculator (`vaccine`):** Menguji integritas sintaks konfigurasi PHP sebelum ditulis ke disk live. Melakukan atomic swap (`os.replace`) dengan preservasi UID/GID/mode file dan mencatat transaksi ke `.anti-php2shell-state.json`. Men-generate virtual patch rules untuk Nginx, Apache (.htaccess), Caddy, dan Cloudflare WAF.
+3. **Automated Rollback Engine (`rollback`):** Memulihkan konfigurasi asli secara atomik berdasarkan ledger riwayat transaksi dengan validasi cryptographic checksum (SHA-256) untuk mencegah restorasi file yang rusak atau terkorupsi.
+4. **Forensic Log Hunter (`hunt`):** Memindai access log dan error log web server dengan stream buffering (hemat memori pada log multi-gigabyte) dan penanganan multi-encoding (URL-decode) untuk mendeteksi signature serangan `PHP_SESSION_UPLOAD_PROGRESS` dan korelasi worker SIGSEGV (signal 11 / exit code 139).
+5. **Harmless Canary Probe (`check`):** Mengirimkan multipart probe non-destruktif untuk memverifikasi apakah filter WAF atau konfigurasi server sudah aktif memblokir vektor serangan tanpa merusak stabilitas server.
 
 ---
 
@@ -57,7 +58,17 @@ Generating WAF Virtual Patch rules in: ./waf-rules
 Reminder: Reload your web server or PHP-FPM service to activate changes.
 ```
 
-### 3. Pindai Log Forensik untuk Deteksi Serangan
+### 3. Pemulihan Konfigurasi (Rollback Engine)
+
+```bash
+$ python3 run.py rollback
+
+--- ANTI-PHP2SHELL ROLLBACK ENGINE ---
+[RESTORED] /etc/php/8.3/cli/php.ini: Restored and verified successfully
+[RESTORED] /etc/php/8.3/fpm/php.ini: Restored and verified successfully
+```
+
+### 4. Pindai Log Forensik untuk Deteksi Serangan
 
 ```bash
 $ python3 run.py hunt --log /var/log/nginx/access.log
@@ -76,16 +87,26 @@ Top Suspect Source IPs:
   - 198.51.100.42: 4 attempts
 ```
 
-### 4. Uji Verifikasi Endpoint (Canary Test)
+### 5. Output JSON untuk CI/CD dan SIEM
+
+Setiap subperintah mendukung flag `--json`:
 
 ```bash
-$ python3 run.py check --url http://localhost/test.php
-
---- ANTI-PHP2SHELL CANARY VERIFIER ---
-Probing: http://localhost/test.php
-Result: [PROTECTED]
-Server response code: HTTP 403
-Status: HTTP 403 returned. WAF or virtual patch is successfully blocking PHP2Shell parameters.
+$ python3 run.py scan --json
+{
+  "binary_path": "/usr/bin/php",
+  "version": "8.3.6",
+  "is_vulnerable": true,
+  "upload_progress_enabled": true,
+  "active_sapi": [],
+  "ini_files": [
+    "/etc/php/8.3/apache2/php.ini",
+    "/etc/php/8.3/cli/php.ini",
+    "/etc/php/8.3/fpm/php.ini"
+  ],
+  "risk_level": "HIGH",
+  "summary": "PHP 8.3.6 vulnerable with session.upload_progress.enabled=1."
+}
 ```
 
 ---
@@ -98,13 +119,19 @@ anti-php2shell/
 │   ├── __init__.py           # Package marker dan version info
 │   ├── checker.py            # Harmless canary HTTP probe
 │   ├── cli.py                # Command-line interface dan subcommands
-│   ├── hunter.py             # Log forensic analyzer dan SIGSEGV detector
+│   ├── fs.py                 # Atomic file operations dan SHA-256 calculation
+│   ├── hunter.py             # Log forensic analyzer dan stream processor
+│   ├── ledger.py             # Transaction tracking dan rollback engine
 │   ├── scanner.py            # SAPI, PHP binary dan php.ini auditor
-│   └── vaccine.py            # INI patcher dan generator aturan WAF
+│   ├── vaccine.py            # INI patcher dan generator aturan WAF
+│   └── validator.py          # Pre-flight syntax validation
 ├── tests/
+│   ├── test_fs.py            # Unit test atomic writes dan permissions
 │   ├── test_hunter.py        # Unit test analisis log dan pattern match
+│   ├── test_ledger.py        # Unit test rollback dan checksum verification
 │   ├── test_scanner.py       # Unit test versi dan parser php.ini
-│   └── test_vaccine.py       # Unit test inokulasi dan WAF exporter
+│   ├── test_vaccine.py       # Unit test inokulasi dan WAF exporter
+│   └── test_validator.py     # Unit test validasi sintaks INI
 ├── waf-rules/                # Direktori output aturan WAF
 ├── run.py                    # Root CLI entrypoint
 ├── README.md                 # Dokumentasi operasional

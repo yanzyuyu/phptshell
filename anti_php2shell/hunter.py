@@ -1,7 +1,8 @@
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Generator, List, Optional
 
 @dataclass
 class IncidentEvent:
@@ -30,18 +31,27 @@ PHP2SHELL_PATTERNS = [
     (re.compile(r"Allowed memory size of \d+ bytes exhausted", re.IGNORECASE), "HEAP_EXHAUSTION_OOM"),
 ]
 
+def normalize_line(line: str) -> str:
+    try:
+        decoded = urllib.parse.unquote(line)
+        return f"{line} {decoded}"
+    except Exception:
+        return line
+
 def analyze_log_file(log_path: Path, max_events: int = 500) -> HuntReport:
     report = HuntReport(total_lines_scanned=0, incidents_found=0)
     if not log_path.is_file():
         return report
 
     try:
-        with log_path.open("r", encoding="utf-8", errors="ignore") as f:
-            for idx, line in enumerate(f, start=1):
+        with log_path.open("r", encoding="utf-8", errors="ignore", buffering=65536) as f:
+            for idx, raw_line in enumerate(f, start=1):
                 report.total_lines_scanned += 1
+                search_target = normalize_line(raw_line)
+
                 matched_category = None
                 for regex, cat in PHP2SHELL_PATTERNS:
-                    if regex.search(line):
+                    if regex.search(search_target):
                         matched_category = cat
                         break
 
@@ -49,11 +59,11 @@ def analyze_log_file(log_path: Path, max_events: int = 500) -> HuntReport:
                     report.incidents_found += 1
                     report.categories[matched_category] = report.categories.get(matched_category, 0) + 1
 
-                    ip_match = IP_REGEX.search(line)
+                    ip_match = IP_REGEX.search(raw_line)
                     client_ip = ip_match.group(0) if ip_match else "unknown"
                     report.attacker_ips[client_ip] = report.attacker_ips.get(client_ip, 0) + 1
 
-                    time_match = TIMESTAMP_REGEX.search(line)
+                    time_match = TIMESTAMP_REGEX.search(raw_line)
                     ts = time_match.group(1) if time_match else None
 
                     if len(report.events) < max_events:
@@ -61,7 +71,7 @@ def analyze_log_file(log_path: Path, max_events: int = 500) -> HuntReport:
                             IncidentEvent(
                                 log_file=log_path.name,
                                 line_number=idx,
-                                raw_line=line.strip(),
+                                raw_line=raw_line.strip(),
                                 category=matched_category,
                                 client_ip=client_ip,
                                 timestamp=ts,

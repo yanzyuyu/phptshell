@@ -39,5 +39,19 @@ class TestVaccine(unittest.TestCase):
                 content = path.read_text(encoding="utf-8")
                 self.assertIn("PHP_SESSION_UPLOAD_PROGRESS", content)
 
+    def test_patch_with_ledger(self):
+        from anti_php2shell.ledger import RollbackLedger
+        with TemporaryDirectory() as tmp_dir:
+            ini_file = Path(tmp_dir) / "php.ini"
+            ini_file.write_text("session.upload_progress.enabled = 1\n", encoding="utf-8")
+            ledger_file = Path(tmp_dir) / "state.json"
+            ledger = RollbackLedger(ledger_file)
+
+            res = patch_single_ini(ini_file, ledger=ledger)
+            self.assertTrue(res.applied)
+            entries = ledger.load()
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].target_path, str(ini_file.resolve()))
+
 if __name__ == "__main__":
     unittest.main()
