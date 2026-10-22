@@ -1,3 +1,5 @@
+<a name="readme-top"></a>
+
 # anti-php2shell
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
@@ -32,6 +34,8 @@ Because this vulnerability resides in the core runtime binary rather than a user
 
 `anti-php2shell` is built exclusively using Python standard library primitives. It requires zero external dependencies, no compilation, and no `pip install`. All disk operations enforce atomic inode replacement (`os.replace`) with permission preservation (`chmod`/`chown`), pre-flight syntax verification, and a cryptographic transaction ledger for 1-click rollback.
 
+<p align="right"><a href="#readme-top"><img src="https://img.shields.io/badge/▲_Back_to_Top-21262d?style=flat-square" alt="Back to Top"></a></p>
+
 ---
 
 ## Architectural Capabilities
@@ -44,6 +48,8 @@ Because this vulnerability resides in the core runtime binary rather than a user
 | **Transaction Ledger (`rollback`)** | State rollback via SHA-256 validation | Restores original configurations atomically using pre-mutation checksum verification. |
 | **Log Forensic Hunter (`hunt`)** | Access and error log pattern analysis | 64KB chunk-buffered streaming with URL-decode normalization to detect encoded probe strings and worker SIGSEGV crashes. |
 | **Endpoint Auditor (`check`)** | HTTP exposure & canary validation | Evaluates public server headers, PHP exposure, WAF layers, and tests upload-progress filtering non-destructively. |
+
+<p align="right"><a href="#readme-top"><img src="https://img.shields.io/badge/▲_Back_to_Top-21262d?style=flat-square" alt="Back to Top"></a></p>
 
 ---
 
@@ -180,6 +186,8 @@ $ python3 run.py scan --json
 }
 ```
 
+<p align="right"><a href="#readme-top"><img src="https://img.shields.io/badge/▲_Back_to_Top-21262d?style=flat-square" alt="Back to Top"></a></p>
+
 ---
 
 ## Repository Structure
@@ -216,6 +224,8 @@ anti-php2shell/
 └── .gitignore                # Git ignore rules
 ```
 
+<p align="right"><a href="#readme-top"><img src="https://img.shields.io/badge/▲_Back_to_Top-21262d?style=flat-square" alt="Back to Top"></a></p>
+
 ---
 
 ## Verification & Test Suite
@@ -228,6 +238,8 @@ python3 -m unittest discover -s tests -v
 
 All 18 test cases execute deterministically in under 0.2 seconds without external dependencies or network access.
 
+<p align="right"><a href="#readme-top"><img src="https://img.shields.io/badge/▲_Back_to_Top-21262d?style=flat-square" alt="Back to Top"></a></p>
+
 ---
 
 ## Contributing
@@ -237,6 +249,8 @@ All 18 test cases execute deterministically in under 0.2 seconds without externa
 3. Ensure all tests pass (`python3 -m unittest discover -s tests -v`) and static audits pass with score 100 (`npx tyw-cli scan .`).
 4. Commit your changes using human-grade, concise messages (`git commit -m "add defense improvement"`).
 5. Push to the branch (`git push origin feature/defense-improvement`) and submit a Pull Request.
+
+<p align="right"><a href="#readme-top"><img src="https://img.shields.io/badge/▲_Back_to_Top-21262d?style=flat-square" alt="Back to Top"></a></p>
 
 ---
 
