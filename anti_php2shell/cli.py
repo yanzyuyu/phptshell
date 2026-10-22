@@ -8,21 +8,23 @@ from anti_php2shell.checker import audit_url
 from anti_php2shell.hunter import scan_log_directory
 from anti_php2shell.ledger import RollbackLedger
 from anti_php2shell.scanner import run_system_scan
+from anti_php2shell.ui import (
+    BOLD,
+    COLOR_BLUE,
+    COLOR_CYAN,
+    COLOR_GRAY,
+    COLOR_GREEN,
+    COLOR_MAGENTA,
+    COLOR_RED,
+    COLOR_WHITE,
+    COLOR_YELLOW,
+    badge,
+    badge_outline,
+    c,
+    print_card,
+    print_header,
+)
 from anti_php2shell.vaccine import export_waf_rules, patch_single_ini, reload_php_services
-
-COLOR_RED = "\033[91m"
-COLOR_GREEN = "\033[92m"
-COLOR_YELLOW = "\033[93m"
-COLOR_BLUE = "\033[94m"
-COLOR_RESET = "\033[0m"
-
-def is_color_enabled() -> bool:
-    return sys.stdout.isatty()
-
-def badge(text: str, color: str) -> str:
-    if not is_color_enabled():
-        return f"[{text}]"
-    return f"{color}[{text}]{COLOR_RESET}"
 
 def cmd_scan(args: argparse.Namespace) -> int:
     result = run_system_scan(custom_ini_dir=args.ini_dir)
@@ -40,29 +42,47 @@ def cmd_scan(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2))
         return 1 if result.risk_level in ("CRITICAL", "HIGH") else 0
 
-    print("\n--- ANTI-PHP2SHELL SECURITY AUDIT ---")
-    print(f"PHP Binary: {result.binary_path or 'Not found in PATH'}")
-    print(f"Detected Version: {result.version_str or 'Unknown'}")
-    print(f"Active SAPI(s): {', '.join(result.active_sapi) if result.active_sapi else 'None detected'}")
-    print(f"session.upload_progress: {'ENABLED (Dangerous)' if result.upload_progress_enabled else 'DISABLED (Safe)'}")
-    print(f"Found php.ini files: {len(result.ini_files)}")
-    for ini in result.ini_files:
-        print(f"  - {ini}")
+    print_header("Host Security Audit", "Evaluating PHP runtime, SAPIs, and upload_progress directives")
+
+    prog_text = (
+        c("ENABLED (Dangerous)", COLOR_RED)
+        if result.upload_progress_enabled
+        else c("DISABLED (Safe)", COLOR_GREEN)
+    )
+    php_ver = (
+        c(result.version_str or "Unknown", COLOR_RED if result.is_vulnerable_version else COLOR_GREEN)
+    )
 
     level = result.risk_level
     if level == "CRITICAL":
-        b = badge("CRITICAL RISK", COLOR_RED)
+        b_status = badge("CRITICAL RISK", "red")
     elif level == "HIGH":
-        b = badge("HIGH RISK", COLOR_RED)
+        b_status = badge("HIGH RISK", "red")
     elif level == "MEDIUM":
-        b = badge("MEDIUM RISK", COLOR_YELLOW)
+        b_status = badge("MEDIUM RISK", "yellow")
     elif level == "IMMUNIZED":
-        b = badge("IMMUNIZED", COLOR_GREEN)
+        b_status = badge("IMMUNIZED", "green")
     else:
-        b = badge(level, COLOR_BLUE)
+        b_status = badge(level, "blue")
 
-    print(f"\nAudit Status: {b}")
-    print(f"Details: {result.summary}\n")
+    card_rows = [
+        ("PHP Binary", c(result.binary_path or "Not found in PATH", COLOR_CYAN)),
+        ("Detected Version", php_ver),
+        ("Active SAPI(s)", c(", ".join(result.active_sapi) if result.active_sapi else "None detected", COLOR_YELLOW if "apache_mod_php" in result.active_sapi else COLOR_WHITE)),
+        ("Upload Progress", prog_text),
+        ("Discovered INIs", c(str(len(result.ini_files)), BOLD + COLOR_WHITE)),
+        ("Audit Status", b_status),
+    ]
+    print_card("RUNTIME DIAGNOSTICS", card_rows)
+
+    if result.ini_files:
+        print(f" {c('Discovered Configuration Targets:', BOLD + COLOR_WHITE)}")
+        for idx, ini in enumerate(result.ini_files):
+            conn = "└─" if idx == len(result.ini_files) - 1 else "├─"
+            print(f"  {c(conn, COLOR_GRAY)} {c(str(ini), COLOR_CYAN)}")
+        print()
+
+    print(f" {c('Recommendation:', BOLD + COLOR_WHITE)} {result.summary}\n")
     return 1 if level in ("CRITICAL", "HIGH") else 0
 
 def cmd_vaccine(args: argparse.Namespace) -> int:
@@ -79,7 +99,7 @@ def cmd_vaccine(args: argparse.Namespace) -> int:
             if args.json:
                 print(json.dumps({"error": f"Specified ini file '{p}' not found."}))
             else:
-                print(f"Error: Specified ini file '{p}' not found.")
+                print(f"{badge('ERROR', 'red')} Specified ini file '{p}' not found.")
             return 1
     else:
         scan_res = run_system_scan()
@@ -117,31 +137,39 @@ def cmd_vaccine(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2))
         return 0
 
-    print("\n--- ANTI-PHP2SHELL ACTIVE INOCULATION ---")
-    if not target_inis:
-        print("No php.ini files detected to inoculate.")
-    else:
-        for pr in patch_results:
-            if pr.get("status") == "DRY_RUN":
-                print(f"[DRY-RUN] Would patch: {pr['file']}")
-            elif pr.get("applied"):
-                print(f"{badge('VACCINATED', COLOR_GREEN)} {pr['file']}")
-                if pr.get("backup"):
-                    print(f"  Backup saved: {pr['backup']}")
-            else:
-                print(f"{badge('FAILED', COLOR_RED)} {pr['file']}: {pr['status']}")
+    print_header("Runtime Inoculation", "Applying atomic INI hardening and exporting WAF virtual patches")
 
-    print(f"\nGenerating WAF Virtual Patch rules in: {out_dir}")
-    for item in waf_data:
-        print(f"  {badge('GENERATED', COLOR_BLUE)} {item['name']}: {item['path']}")
+    if not target_inis:
+        print(f" {badge('NOTICE', 'blue')} No php.ini targets detected to inoculate.\n")
+    else:
+        print(f" {c('Configuration Inoculation Targets:', BOLD + COLOR_WHITE)}")
+        for idx, pr in enumerate(patch_results):
+            conn = "└─" if idx == len(patch_results) - 1 else "├─"
+            if pr.get("status") == "DRY_RUN":
+                print(f"  {c(conn, COLOR_GRAY)} {badge('DRY-RUN', 'yellow')} {c(pr['file'], COLOR_CYAN)}")
+            elif pr.get("applied"):
+                print(f"  {c(conn, COLOR_GRAY)} {badge('VACCINATED', 'green')} {c(pr['file'], COLOR_CYAN)}")
+                if pr.get("backup"):
+                    print(f"     {c('└─ Backup:', COLOR_GRAY)} {c(pr['backup'], COLOR_GRAY)}")
+            else:
+                print(f"  {c(conn, COLOR_GRAY)} {badge('FAILED', 'red')} {c(pr['file'], COLOR_RED)}: {pr['status']}")
+        print()
+
+    print(f" {c('Exported WAF Virtual Patch Rules:', BOLD + COLOR_WHITE)}")
+    for idx, item in enumerate(waf_data):
+        conn = "└─" if idx == len(waf_data) - 1 else "├─"
+        print(f"  {c(conn, COLOR_GRAY)} {badge_outline('EXPORTED', 'cyan')} {c(item['name'], BOLD + COLOR_WHITE)}: {c(item['path'], COLOR_CYAN)}")
+    print()
 
     if args.reload:
-        print("\nReloading services gracefully:")
-        for r in reload_data:
-            st = badge("RELOADED", COLOR_GREEN) if r["success"] else badge("FAILED", COLOR_RED)
-            print(f"  {st} {r['service']}: {r['detail']}")
+        print(f" {c('Graceful Service Reloads:', BOLD + COLOR_WHITE)}")
+        for idx, r in enumerate(reload_data):
+            conn = "└─" if idx == len(reload_data) - 1 else "├─"
+            st = badge("RELOADED", "green") if r["success"] else badge("FAILED", "red")
+            print(f"  {c(conn, COLOR_GRAY)} {st} {c(r['service'], BOLD + COLOR_WHITE)}: {r['detail']}")
+        print()
     else:
-        print("\nReminder: Reload your web server or PHP-FPM service to activate changes.\n")
+        print(f" {badge('REMINDER', 'yellow')} Reload your web server or PHP-FPM service to activate configuration changes.\n")
 
     return 0
 
@@ -158,19 +186,21 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         print(json.dumps({"rollback_results": data}, indent=2))
         return 0 if all(ok for _, ok, _ in results) else 1
 
-    print("\n--- ANTI-PHP2SHELL ROLLBACK ENGINE ---")
+    print_header("Rollback Engine", "Restoring configuration states via SHA-256 validated ledger")
+
     if not results:
-        print("No recorded transactions found in ledger to rollback.")
+        print(f" {badge('CLEAN', 'green')} No recorded transactions found in ledger to rollback.\n")
         return 0
 
     all_ok = True
-    for target, ok, detail in results:
+    print(f" {c('Rollback Operations:', BOLD + COLOR_WHITE)}")
+    for idx, (target, ok, detail) in enumerate(results):
+        conn = "└─" if idx == len(results) - 1 else "├─"
         if ok:
-            print(f"{badge('RESTORED', COLOR_GREEN)} {target}: {detail}")
+            print(f"  {c(conn, COLOR_GRAY)} {badge('RESTORED', 'green')} {c(target, COLOR_CYAN)}: {detail}")
         else:
             all_ok = False
-            print(f"{badge('FAILED', COLOR_RED)} {target}: {detail}")
-
+            print(f"  {c(conn, COLOR_GRAY)} {badge('FAILED', 'red')} {c(target, COLOR_RED)}: {detail}")
     print()
     return 0 if all_ok else 1
 
@@ -197,27 +227,38 @@ def cmd_hunt(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2))
         return 0
 
-    print(f"\n--- ANTI-PHP2SHELL FORENSIC LOG HUNTER ---")
-    print(f"Inspecting target path: {log_path}")
-    print(f"Lines Scanned: {report.total_lines_scanned:,}")
-    print(f"Incidents Detected: {report.incidents_found}")
+    print_header("Forensic Log Hunter", f"Scanning access & error logs in: {log_path}")
+
+    summary_rows = [
+        ("Lines Processed", c(f"{report.total_lines_scanned:,}", BOLD + COLOR_WHITE)),
+        ("Suspicious Incidents", c(str(report.incidents_found), COLOR_RED if report.incidents_found > 0 else COLOR_GREEN)),
+        ("Unique Suspect IPs", c(str(len(report.attacker_ips)), COLOR_YELLOW if report.attacker_ips else COLOR_GREEN)),
+    ]
+    print_card("LOG METRICS", summary_rows)
+
     if report.incidents_found > 0:
-        print(f"\n{badge('INCIDENTS DETECTED', COLOR_RED)}")
-        print("\nBreakdown by Category:")
+        print(f" {badge('INCIDENTS DETECTED', 'red')}\n")
+        print(f" {c('Incident Signatures:', BOLD + COLOR_WHITE)}")
         for cat, cnt in report.categories.items():
-            print(f"  - {cat}: {cnt}")
+            print(f"  {c('•', COLOR_RED)} {c(cat, COLOR_YELLOW)}: {c(str(cnt), BOLD + COLOR_WHITE)}")
+        print()
 
-        print("\nTop Suspect Source IPs:")
-        sorted_ips = sorted(report.attacker_ips.items(), key=lambda x: x[1], reverse=True)[:10]
+        print(f" {c('Top Suspect Remote IPs:', BOLD + COLOR_WHITE)}")
+        sorted_ips = sorted(report.attacker_ips.items(), key=lambda x: x[1], reverse=True)[:8]
         for ip, cnt in sorted_ips:
-            print(f"  - {ip}: {cnt} attempts")
+            print(f"  {c('•', COLOR_YELLOW)} {c(ip, COLOR_CYAN)}: {cnt} attempts")
+        print()
 
-        print("\nRecent Chronological Findings:")
-        for ev in report.events[:10]:
-            print(f"  [{ev.timestamp or 'NO_TS'}] [{ev.category}] IP: {ev.client_ip} in {ev.log_file}:{ev.line_number}")
+        print(f" {c('Recent Event Trace:', BOLD + COLOR_WHITE)}")
+        for ev in report.events[:8]:
+            ts = c(ev.timestamp or "NO_TS", COLOR_GRAY)
+            ip_str = c(ev.client_ip or "unknown", COLOR_CYAN)
+            cat_str = c(ev.category, COLOR_YELLOW)
+            print(f"  [{ts}] [{cat_str}] IP: {ip_str} in {c(ev.log_file, COLOR_GRAY)}:{ev.line_number}")
+        print()
     else:
-        print(f"\n{badge('CLEAN', COLOR_GREEN)} No PHP2Shell attack signatures found.")
-    print()
+        print(f" {badge('CLEAN', 'green')} No PHP2Shell attack signatures or memory corruption crashes detected.\n")
+
     return 0
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -238,30 +279,50 @@ def cmd_check(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2))
         return 0 if report.risk_level in ("PROTECTED", "LOW") else 1
 
-    print("\n--- ANTI-PHP2SHELL ENDPOINT DEFENSE AUDITOR ---")
-    print(f"Target URL: {report.target_url}")
-    print(f"HTTP Status: {report.status_code if report.status_code is not None else 'Unreachable'}")
-    print(f"Server Header: {report.server_header or 'Hidden / Not exposed'}")
-    print(f"PHP Runtime: {report.php_version or 'Hidden / Not exposed'}")
-    print(f"WAF Layer: {report.waf_detected or 'None detected'}")
-    print(f"Virtual Patch: {'ACTIVE (Drop upload progress)' if report.virtual_patch_active else 'UNFILTERED'}")
-    if report.missing_headers:
-        print(f"Missing Hardening Headers: {', '.join(report.missing_headers)}")
+    print_header("Endpoint Exposure Auditor", "Testing remote HTTP headers, WAF filters, and canary parameters")
+
+    php_str = (
+        c(f"{report.php_version} (Vulnerable)", COLOR_RED)
+        if report.is_php_vulnerable
+        else c(report.php_version or "Hidden / Not exposed", COLOR_GREEN if report.php_version else COLOR_WHITE)
+    )
+    patch_str = (
+        c("ACTIVE (HTTP 403 Forbidden)", COLOR_GREEN)
+        if report.virtual_patch_active
+        else c("UNFILTERED (Accepted)", COLOR_RED)
+    )
 
     level = report.risk_level
     if level == "PROTECTED":
-        b = badge("PROTECTED", COLOR_GREEN)
+        b_risk = badge("PROTECTED", "green")
     elif level == "CRITICAL":
-        b = badge("CRITICAL EXPOSURE", COLOR_RED)
+        b_risk = badge("CRITICAL EXPOSURE", "red")
     elif level == "EXPOSED":
-        b = badge("EXPOSED", COLOR_YELLOW)
+        b_risk = badge("EXPOSED", "yellow")
     elif level == "LOW":
-        b = badge("LOW RISK", COLOR_BLUE)
+        b_risk = badge("LOW RISK", "blue")
     else:
-        b = badge(level, COLOR_RED)
+        b_risk = badge(level, "red")
 
-    print(f"\nDefense Status: {b}")
-    print(f"Summary: {report.summary}\n")
+    endpoint_rows = [
+        ("Target URL", c(report.target_url, COLOR_CYAN)),
+        ("HTTP Response", c(str(report.status_code) if report.status_code is not None else "Unreachable", COLOR_GREEN if report.status_code == 200 else COLOR_YELLOW)),
+        ("Server Header", c(report.server_header or "Hidden", COLOR_WHITE)),
+        ("PHP Runtime", php_str),
+        ("WAF Detected", c(report.waf_detected or "None detected", COLOR_MAGENTA if report.waf_detected else COLOR_GRAY)),
+        ("Virtual Patch", patch_str),
+        ("Audit Status", b_risk),
+    ]
+    print_card("ENDPOINT POSTURE", endpoint_rows)
+
+    if report.missing_headers:
+        print(f" {c('Missing Security Hardening Headers:', BOLD + COLOR_WHITE)}")
+        for idx, h in enumerate(report.missing_headers):
+            conn = "└─" if idx == len(report.missing_headers) - 1 else "├─"
+            print(f"  {c(conn, COLOR_GRAY)} {c(h, COLOR_YELLOW)}")
+        print()
+
+    print(f" {c('Analysis:', BOLD + COLOR_WHITE)} {report.summary}\n")
     return 0 if level in ("PROTECTED", "LOW") else 1
 
 def build_parser() -> argparse.ArgumentParser:
